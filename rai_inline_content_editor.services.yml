@@ -1,0 +1,9 @@
+services:
+  rai_inline_content_editor.render_update_button:
+    class: Drupal\rai_inline_content_editor\RenderUpdateButtonTwigExtension
+    arguments: ['@current_route_match', '@rai_inline_content_editor.access_checker', '@entity_type.manager']
+    tags:
+      - { name: twig.extension }
+  rai_inline_content_editor.access_checker:
+    class: Drupal\rai_inline_content_editor\Access\InlineContentEditorAccessCheck
+    arguments: ['@current_user']

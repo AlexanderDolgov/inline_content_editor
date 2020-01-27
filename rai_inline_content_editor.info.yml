@@ -1,0 +1,7 @@
+name: 'RAI Inline Content Editor'
+type: module
+description: 'Enables functionality to edit content via inline forms.'
+core: 8.x
+package: 'Custom'
+dependencies:
+  - custom:rai_group_common

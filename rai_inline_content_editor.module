@@ -1,0 +1,177 @@
+<?php
+
+/**
+ * @file
+ * Contains rai_inline_content_editor.module.
+ */
+
+use Drupal\Core\Ajax\AjaxResponse;
+use Drupal\Core\Ajax\InvokeCommand;;
+use Drupal\Core\Ajax\ReplaceCommand;
+use Drupal\Core\Form\FormStateInterface;
+use Drupal\Core\Routing\RouteMatchInterface;
+use Symfony\Component\HttpFoundation\JsonResponse;
+
+/**
+ * Implements hook_help().
+ */
+function rai_inline_content_editor_help($route_name, RouteMatchInterface $route_match) {
+  switch ($route_name) {
+    // Main module help for the rai_inline_content_editor module.
+    case 'help.page.rai_inline_content_editor':
+      $output = '';
+      $output .= '<h3>' . t('About') . '</h3>';
+      $output .= '<p>' . t('Enables functionality to edit content via inline forms.') . '</p>';
+      return $output;
+
+    default:
+  }
+}
+
+/**
+ * Implements hook_theme().
+ */
+function rai_inline_content_editor_theme() {
+  return [
+    'rai_inline_content_editor' => [
+      'render element' => 'children',
+    ],
+  ];
+}
+
+/**
+ * Implements hook_entity_type_build().
+ */
+function rai_inline_content_editor_entity_type_build(array &$entity_types) {
+  $entity_types['node']->setFormClass('main_information', 'Drupal\node\NodeForm');
+  $entity_types['node']->setFormClass('picture', 'Drupal\node\NodeForm');
+  $entity_types['node']->setFormClass('cover', 'Drupal\node\NodeForm');
+  $entity_types['node']->setFormClass('description', 'Drupal\node\NodeForm');
+}
+
+/**
+ * Implements hook_form_alter().
+ */
+function rai_inline_content_editor_form_alter(&$form, FormStateInterface $form_state, $form_id) {
+  // List forms that should be submitted via AJAX.
+  // @todo Find another way to differentiate the forms.
+  $ajax_forms = [
+    'node_job_cover_form',
+    'node_job_main_information_form',
+    'node_job_picture_form',
+    'node_job_description_form',
+  ];
+
+  // Check the current form against the list and add an AJAX callback if needed.
+  if (in_array($form_id, $ajax_forms)) {
+    $form['actions']['submit']['#ajax'] = [
+      'callback' => '_rai_inline_content_editor_render_entity_callback',
+    ];
+  }
+}
+
+/**
+ * Callback for the inline editor forms to render an entity.
+ *
+ * Renders an entity and returns some AjaxResponse commands to replace
+ * the current page's content with the updated entity.
+ *
+ * @param array $form
+ *   The form itself.
+ * @param \Drupal\Core\Form\FormStateInterface $form_state
+ *   Form state object.
+ *
+ * @return Drupal\Core\Ajax\AjaxResponse|Symfony\Component\HttpFoundation\JsonResponse
+ *   AjaxResponse on success or JsonResponse on failure.
+ */
+function _rai_inline_content_editor_render_entity_callback(array &$form, FormStateInterface $form_state) {
+  // Check base form ID and render an entity based on the entity type and ID.
+  $base_form_id = $form_state->getBuildInfo()['base_form_id'];
+  switch ($base_form_id) {
+    case 'node_form':
+      $nid = $form_state->getStorage()['nid'];
+      $output = _rai_inline_content_editor_get_rendered_entity('node', $nid);
+      break;
+  }
+
+  // Return an error if entity was not rendered.
+  if ($output instanceof JsonResponse) {
+    return $output;
+  }
+
+  // Remove status message telling that entity was updated.
+  // This is not final solution, will need to find another way to show
+  // success messages to the user. Drupal default behavior won't work
+  // because the message will be shown only after page reload.
+  // @todo Find another way to hide this kind of messages.
+  \Drupal::messenger()->deleteByType('status');
+
+  // Build an AjaxResponse object.
+  $response = new AjaxResponse();
+  $response->addCommand(new InvokeCommand('.ui-dialog button.ui-dialog-titlebar-close', 'click'));
+  $response->addCommand(new ReplaceCommand('.content-page', $output));
+
+  return $response;
+}
+
+/**
+ * Build and return a rendered entity of the given entity type and ID.
+ *
+ * @param string $entity_type_id
+ *   Entity type ID.
+ * @param string|int $entity_id
+ *   Entity ID.
+ *
+ * @return Drupal\Core\Render\Markup|Symfony\Component\HttpFoundation\JsonResponse
+ *   Rendered entity on success and JsonResponse on failure.
+ */
+function _rai_inline_content_editor_get_rendered_entity($entity_type_id, $entity_id) {
+  // Get storage and view builder for a given entity type.
+  try {
+    $view_builder = \Drupal::entityTypeManager()->getViewBuilder($entity_type_id);
+    $storage = \Drupal::entityTypeManager()->getStorage($entity_type_id);
+  }
+  catch (\Exception $e) {
+    return _rai_inline_content_editor_process_error($e->getMessage());
+  }
+
+  // Load an entity by the given ID.
+  $entity = $storage->load($entity_id);
+
+  if (!$entity) {
+    $error_message = sprintf('Unable to load entity with id "%s".', $entity_id);
+    return _rai_inline_content_editor_process_error($error_message);
+  }
+
+  // Create a render array for the loaded entity and render it.
+  $build = $view_builder->view($entity, 'default');
+  $rendered_entity = render($build);
+
+  if (!$rendered_entity) {
+    $error_message = sprintf('Unable to render entity with id "%s".', $entity_id);
+    return _rai_inline_content_editor_process_error($error_message);
+  }
+
+  // Return rendered entity.
+  return $rendered_entity;
+}
+
+/**
+ * Processes a given error.
+ *
+ * Currently it logs error to the dblog and returns JsonResponse
+ * containing this error.
+ *
+ * @param string $error_message
+ *   Error message.
+ *
+ * @return \Symfony\Component\HttpFoundation\JsonResponse
+ *   JsonResponse object (to be used in controllers).
+ */
+function _rai_inline_content_editor_process_error($error_message) {
+  // Log the error in dblog.
+  \Drupal::logger('rai_inline_content_editor')->error($error_message);
+
+  // Return a JsonResponse object.
+  return new JsonResponse(['error' => $error_message]);
+}
